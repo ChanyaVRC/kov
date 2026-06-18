@@ -1,0 +1,15 @@
+[book]
+title = "kov — Keyed Offset Vault"
+description = "Keyed Offset Vault: parallel zstd seekable file compressor"
+authors = []
+language = "en"
+src = "docs/src"
+
+[build]
+build-dir = "docs/book"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/YOUR_USERNAME/kov"
+edit-url-template = "https://github.com/YOUR_USERNAME/kov/edit/main/{path}"
