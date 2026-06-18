@@ -25,7 +25,7 @@ enum Commands {
         output: PathBuf,
         #[arg(short, long, default_value = "3", value_parser = clap::value_parser!(i32).range(1..=22))]
         level: i32,
-        #[arg(short, long, default_value = "1048576")]
+        #[arg(short, long, default_value = "1048576", value_parser = parse_frame_size)]
         frame_size: usize,
         #[arg(short, long)]
         threads: Option<usize>,
@@ -89,6 +89,14 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn parse_frame_size(s: &str) -> Result<usize, String> {
+    let n: usize = s.parse().map_err(|_| format!("invalid frame size: '{s}'"))?;
+    if n == 0 {
+        return Err("frame-size must be at least 1".to_string());
+    }
+    Ok(n)
 }
 
 fn parse_range(s: &str) -> anyhow::Result<(u64, u64)> {

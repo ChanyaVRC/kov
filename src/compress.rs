@@ -32,18 +32,15 @@ pub fn compress_file(
     let in_file = File::open(input).context("open input")?;
     let mmap = unsafe { Mmap::map(&in_file).context("mmap input")? };
 
-    // Configure rayon thread pool if requested
-    if let Some(n) = opts.threads {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(n)
-            .build_global()
-            .ok(); // ignore error if pool already initialised
+    if let Some(n) = opts.threads
+        && let Err(e) = rayon::ThreadPoolBuilder::new().num_threads(n).build_global()
+    {
+        eprintln!("warning: could not set thread count to {n}: {e}");
     }
 
     let data: &[u8] = &mmap;
     let uncompressed_len = data.len() as u64;
 
-    // Split into frame-sized chunks
     let chunks: Vec<&[u8]> = if data.is_empty() {
         vec![]
     } else {
@@ -52,11 +49,11 @@ pub fn compress_file(
 
     let level = opts.level;
 
-    // Compress all chunks in parallel
+    // Compress all chunks in parallel; propagate errors via Result collection
     let compressed: Vec<Vec<u8>> = chunks
         .par_iter()
-        .map(|chunk| zstd::encode_all(*chunk, level).expect("zstd encode failed"))
-        .collect();
+        .map(|chunk| zstd::encode_all(*chunk, level).context("zstd encode failed"))
+        .collect::<anyhow::Result<_>>()?;
 
     let out_file = File::create(output).context("create output")?;
     let mut writer = BufWriter::new(out_file);
@@ -64,23 +61,13 @@ pub fn compress_file(
     let mut entries: Vec<SeekEntry> = Vec::with_capacity(compressed.len());
     let mut total_compressed: u64 = 0;
 
-    for frame in &compressed {
-        let cs = frame.len() as u32;
-        // decompressed size for last frame may be smaller than frame_size
-        entries.push(SeekEntry {
-            compressed_size: cs,
-            decompressed_size: 0, // filled below
-        });
+    // Single pass: decompressed_size taken directly from each original chunk length
+    for (frame, chunk) in compressed.iter().zip(chunks.iter()) {
+        let cs = u32::try_from(frame.len()).context("compressed frame exceeds 4 GiB")?;
+        let ds = u32::try_from(chunk.len()).context("frame size exceeds 4 GiB")?;
+        entries.push(SeekEntry { compressed_size: cs, decompressed_size: ds });
         writer.write_all(frame).context("write frame")?;
         total_compressed += cs as u64;
-    }
-
-    // Fill decompressed sizes from original chunk sizes
-    let frame_size = opts.frame_size;
-    for (i, entry) in entries.iter_mut().enumerate() {
-        let start = i * frame_size;
-        let end = (start + frame_size).min(data.len());
-        entry.decompressed_size = (end - start) as u32;
     }
 
     write_seek_table(&mut writer, &entries).context("write seek table")?;

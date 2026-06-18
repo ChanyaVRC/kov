@@ -14,9 +14,12 @@ pub struct SeekEntry {
 
 /// Write the seek table as a zstd skippable frame at the current position.
 pub fn write_seek_table<W: Write>(w: &mut W, entries: &[SeekEntry]) -> anyhow::Result<()> {
-    let n = entries.len() as u32;
+    let n = u32::try_from(entries.len()).context("too many frames (exceeds u32::MAX)")?;
     // frame_size = per-frame entries (8B each) + footer (9B)
-    let frame_size: u32 = n * 8 + 9;
+    let frame_size = n
+        .checked_mul(8)
+        .and_then(|v| v.checked_add(9))
+        .context("seek table size overflow")?;
 
     write_u32_le(w, SKIPPABLE_MAGIC)?;
     write_u32_le(w, frame_size)?;
@@ -36,13 +39,8 @@ pub fn write_seek_table<W: Write>(w: &mut W, entries: &[SeekEntry]) -> anyhow::R
 
 /// Read the seek table from the end of a seekable stream.
 pub fn read_seek_table<R: Read + Seek>(r: &mut R) -> anyhow::Result<Vec<SeekEntry>> {
-    // Footer is the last 9 bytes of the skippable frame payload.
-    // Skippable frame: magic(4) + frame_size(4) + payload(frame_size)
-    // Last 9 bytes of payload = footer: num_frames(4) + descriptor(1) + seekable_magic(4)
-    // Total from end: 9 bytes into the payload, plus the 8-byte skippable header prefix = 17 bytes from end.
-    // But we need to find the frame_size first.
-
-    // Read from end: last 4 bytes = SEEKABLE_MAGIC, before that 1 byte descriptor, before that 4 bytes = num_frames
+    // Footer is the last 9 bytes of the skippable frame payload:
+    // num_frames(4) + descriptor(1) + seekable_magic(4)
     r.seek(SeekFrom::End(-9)).context("seek to footer")?;
 
     let num_frames = read_u32_le(r)?;
@@ -56,19 +54,22 @@ pub fn read_seek_table<R: Read + Seek>(r: &mut R) -> anyhow::Result<Vec<SeekEntr
         bail!("unsupported seek table descriptor: 0x{descriptor:02X}");
     }
 
-    // Seek to start of skippable frame payload (entries start here)
-    // Layout from end: [entries: 8*N][footer: 9] + skippable header [magic:4][frame_size:4]
+    // Seek to start of skippable frame: [magic:4][frame_size:4][entries...][footer:9]
     let entries_size = num_frames as i64 * 8;
     let payload_size = entries_size + 9;
     r.seek(SeekFrom::End(-(payload_size + 8))).context("seek to entries")?;
 
-    // Validate skippable frame magic and frame_size
+    // Validate skippable frame header
     let sk_magic = read_u32_le(r)?;
     let sk_frame_size = read_u32_le(r)?;
     if sk_magic != SKIPPABLE_MAGIC {
         bail!("invalid skippable frame magic: 0x{sk_magic:08X}");
     }
-    if sk_frame_size != num_frames * 8 + 9 {
+    let expected_frame_size = num_frames
+        .checked_mul(8)
+        .and_then(|v| v.checked_add(9))
+        .context("seek table frame count overflow")?;
+    if sk_frame_size != expected_frame_size {
         bail!("seek table frame_size mismatch");
     }
 
@@ -157,5 +158,12 @@ mod tests {
         ];
         let offsets = frame_offsets(&entries);
         assert_eq!(offsets, vec![0, 100, 250]);
+    }
+
+    #[test]
+    fn invalid_magic_rejected() {
+        let mut buf = vec![0u8; 64];
+        let mut cur = Cursor::new(&mut buf);
+        assert!(read_seek_table(&mut cur).is_err());
     }
 }

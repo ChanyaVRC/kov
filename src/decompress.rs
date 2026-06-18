@@ -27,12 +27,17 @@ pub fn read_info(path: &Path) -> anyhow::Result<DecompressInfo> {
     Ok(DecompressInfo { entries, uncompressed_size })
 }
 
-/// Decompress the full file from `input` to `output`.
-pub fn decompress_full(input: &Path, output: &Path) -> anyhow::Result<u64> {
-    let mut f = File::open(input).context("open input")?;
+/// Open a .kov file and return (file handle, seek entries, per-frame compressed offsets).
+fn open_kov(path: &Path) -> anyhow::Result<(File, Vec<SeekEntry>, Vec<u64>)> {
+    let mut f = File::open(path).context("open input")?;
     let entries = read_seek_table(&mut f).context("read seek table")?;
     let offsets = frame_offsets(&entries);
+    Ok((f, entries, offsets))
+}
 
+/// Decompress the full file from `input` to `output`.
+pub fn decompress_full(input: &Path, output: &Path) -> anyhow::Result<u64> {
+    let (mut f, entries, offsets) = open_kov(input)?;
     let out = File::create(output).context("create output")?;
     let mut writer = BufWriter::new(out);
     let mut total = 0u64;
@@ -57,23 +62,19 @@ pub fn decompress_range(
     offset: u64,
     len: u64,
 ) -> anyhow::Result<u64> {
-    let mut f = File::open(input).context("open input")?;
-    let entries = read_seek_table(&mut f).context("read seek table")?;
-    let offsets = frame_offsets(&entries);
+    let (mut f, entries, offsets) = open_kov(input)?;
 
     let uncompressed_total: u64 = entries.iter().map(|e| e.decompressed_size as u64).sum();
+    let end = offset.checked_add(len).context("offset + len overflows u64")?;
     anyhow::ensure!(
-        offset + len <= uncompressed_total,
-        "range [{offset}, {}) exceeds file size {uncompressed_total}",
-        offset + len
+        end <= uncompressed_total,
+        "range [{offset}, {end}) exceeds file size {uncompressed_total}"
     );
 
     let out = File::create(output).context("create output")?;
     let mut writer = BufWriter::new(out);
 
-    // Walk frames and output only the bytes that fall within [offset, offset+len)
     let mut decompressed_cursor: u64 = 0;
-    let end = offset + len;
     let mut written = 0u64;
 
     for (i, entry) in entries.iter().enumerate() {
@@ -94,7 +95,8 @@ pub fn decompress_range(
         let decompressed = zstd::decode_all(frame_buf.as_slice()).context("zstd decode")?;
 
         let slice_start = (offset.saturating_sub(frame_start)) as usize;
-        let slice_end = (end - frame_start).min(entry.decompressed_size as u64) as usize;
+        // Clamp to actual decompressed buffer length, not the seek table's declared size
+        let slice_end = (end - frame_start).min(decompressed.len() as u64) as usize;
         writer.write_all(&decompressed[slice_start..slice_end])?;
         written += (slice_end - slice_start) as u64;
 
