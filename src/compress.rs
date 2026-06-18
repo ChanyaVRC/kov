@@ -8,7 +8,7 @@ use anyhow::Context;
 use memmap2::Mmap;
 use rayon::prelude::*;
 
-use crate::seek_table::{write_seek_table, SeekEntry};
+use crate::seek_table::{SeekEntry, write_seek_table};
 
 pub struct CompressOptions {
     pub level: i32,
@@ -18,7 +18,11 @@ pub struct CompressOptions {
 
 impl Default for CompressOptions {
     fn default() -> Self {
-        Self { level: 3, frame_size: 1024 * 1024, threads: None }
+        Self {
+            level: 3,
+            frame_size: 1024 * 1024,
+            threads: None,
+        }
     }
 }
 
@@ -33,7 +37,9 @@ pub fn compress_file(
     let mmap = unsafe { Mmap::map(&in_file).context("mmap input")? };
 
     if let Some(n) = opts.threads
-        && let Err(e) = rayon::ThreadPoolBuilder::new().num_threads(n).build_global()
+        && let Err(e) = rayon::ThreadPoolBuilder::new()
+            .num_threads(n)
+            .build_global()
     {
         eprintln!("warning: could not set thread count to {n}: {e}");
     }
@@ -65,7 +71,10 @@ pub fn compress_file(
     for (frame, chunk) in compressed.iter().zip(chunks.iter()) {
         let cs = u32::try_from(frame.len()).context("compressed frame exceeds 4 GiB")?;
         let ds = u32::try_from(chunk.len()).context("frame size exceeds 4 GiB")?;
-        entries.push(SeekEntry { compressed_size: cs, decompressed_size: ds });
+        entries.push(SeekEntry {
+            compressed_size: cs,
+            decompressed_size: ds,
+        });
         writer.write_all(frame).context("write frame")?;
         total_compressed += cs as u64;
     }

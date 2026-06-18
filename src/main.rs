@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use anyhow::Context;
 use clap::{Parser, Subcommand};
 
-use compress::{compress_file, CompressOptions};
+use compress::{CompressOptions, compress_file};
 use decompress::{decompress_full, decompress_range, read_info};
 
 #[derive(Parser)]
@@ -39,17 +39,25 @@ enum Commands {
         range: Option<String>,
     },
     /// Show seek table info for a compressed file
-    Info {
-        input: PathBuf,
-    },
+    Info { input: PathBuf },
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Encode { input, output, level, frame_size, threads } => {
-            let opts = CompressOptions { level, frame_size, threads };
+        Commands::Encode {
+            input,
+            output,
+            level,
+            frame_size,
+            threads,
+        } => {
+            let opts = CompressOptions {
+                level,
+                frame_size,
+                threads,
+            };
             let (uncompressed, compressed, frames) =
                 compress_file(&input, &output, &opts).context("compression failed")?;
             let ratio = uncompressed as f64 / compressed as f64;
@@ -60,10 +68,15 @@ fn main() -> anyhow::Result<()> {
             );
         }
 
-        Commands::Decode { input, output, range } => {
+        Commands::Decode {
+            input,
+            output,
+            range,
+        } => {
             let written = if let Some(r) = range {
                 let (offset, len) = parse_range(&r)?;
-                decompress_range(&input, &output, offset, len).context("partial decompress failed")?
+                decompress_range(&input, &output, offset, len)
+                    .context("partial decompress failed")?
             } else {
                 decompress_full(&input, &output).context("decompress failed")?
             };
@@ -92,7 +105,9 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn parse_frame_size(s: &str) -> Result<usize, String> {
-    let n: usize = s.parse().map_err(|_| format!("invalid frame size: '{s}'"))?;
+    let n: usize = s
+        .parse()
+        .map_err(|_| format!("invalid frame size: '{s}'"))?;
     if n == 0 {
         return Err("frame-size must be at least 1".to_string());
     }

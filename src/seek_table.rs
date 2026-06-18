@@ -1,6 +1,6 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 
 // zstd seekable format constants
 const SKIPPABLE_MAGIC: u32 = 0x184D2A5E;
@@ -57,7 +57,8 @@ pub fn read_seek_table<R: Read + Seek>(r: &mut R) -> anyhow::Result<Vec<SeekEntr
     // Seek to start of skippable frame: [magic:4][frame_size:4][entries...][footer:9]
     let entries_size = num_frames as i64 * 8;
     let payload_size = entries_size + 9;
-    r.seek(SeekFrom::End(-(payload_size + 8))).context("seek to entries")?;
+    r.seek(SeekFrom::End(-(payload_size + 8)))
+        .context("seek to entries")?;
 
     // Validate skippable frame header
     let sk_magic = read_u32_le(r)?;
@@ -132,9 +133,18 @@ mod tests {
     #[test]
     fn round_trip_multiple() {
         let entries = vec![
-            SeekEntry { compressed_size: 512, decompressed_size: 1024 },
-            SeekEntry { compressed_size: 300, decompressed_size: 1024 },
-            SeekEntry { compressed_size: 200, decompressed_size: 512 },
+            SeekEntry {
+                compressed_size: 512,
+                decompressed_size: 1024,
+            },
+            SeekEntry {
+                compressed_size: 300,
+                decompressed_size: 1024,
+            },
+            SeekEntry {
+                compressed_size: 200,
+                decompressed_size: 512,
+            },
         ];
         let mut buf = Vec::new();
         write_seek_table(&mut buf, &entries).unwrap();
@@ -152,9 +162,18 @@ mod tests {
     #[test]
     fn frame_offsets_correct() {
         let entries = vec![
-            SeekEntry { compressed_size: 100, decompressed_size: 200 },
-            SeekEntry { compressed_size: 150, decompressed_size: 200 },
-            SeekEntry { compressed_size: 50, decompressed_size: 100 },
+            SeekEntry {
+                compressed_size: 100,
+                decompressed_size: 200,
+            },
+            SeekEntry {
+                compressed_size: 150,
+                decompressed_size: 200,
+            },
+            SeekEntry {
+                compressed_size: 50,
+                decompressed_size: 100,
+            },
         ];
         let offsets = frame_offsets(&entries);
         assert_eq!(offsets, vec![0, 100, 250]);
