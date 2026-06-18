@@ -66,7 +66,7 @@ Frame          Compressed     Decompressed
 | zstd -3 -T0 | 54 ms | 1.35x | 926 MB/s |
 | **kov -l 3 (32T)** | **45 ms** | 1.34x | **1111 MB/s** |
 
-→ [Full benchmark details](https://YOUR_USERNAME.github.io/kov/performance.html) (3 datasets including random text and random bytes)
+→ [Full benchmark details](https://chanyavrc.github.io/kov/performance.html) (3 datasets including random text and random bytes)
 
 ## Output format
 
